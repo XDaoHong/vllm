@@ -22,6 +22,8 @@ class SiluAndMul(nn.Module):
         x: (num_tokens, 2 * d) or (batch_size, seq_len, 2 * d)
         return: (num_tokens, d) or (batch_size, seq_len, d)
     """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
     def _forward(self, x: torch.Tensor) -> torch.Tensor:
         """PyTorch-native implementation equivalent to forward()."""
@@ -29,11 +31,8 @@ class SiluAndMul(nn.Module):
         return F.silu(x[..., :d]) * x[..., d:]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        d = x.shape[-1] // 2
-        output_shape = (x.shape[:-1] + (d, ))
-        out = torch.empty(output_shape, dtype=x.dtype, device=x.device)
-        ops.silu_and_mul(out, x)
-        return out
+        x0, x1 = x.chunk(2, dim=-1)
+        return F.silu(x0) * x1
 
 
 class GeluAndMul(nn.Module):
@@ -46,29 +45,13 @@ class GeluAndMul(nn.Module):
         return: (batch_size, seq_len, d) or (num_tokens, d)
     """
 
-    def __init__(self, approximate: str = "none"):
-        super().__init__()
-        self.approximate = approximate
-        if approximate not in ("none", "tanh"):
-            raise ValueError(f"Unknown approximate mode: {approximate}")
-
-    def _forward(self, x: torch.Tensor) -> torch.Tensor:
-        """PyTorch-native implementation equivalent to forward()."""
-        d = x.shape[-1] // 2
-        return F.gelu(x[..., :d], approximate=self.approximate) * x[..., d:]
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.gelu = torch.nn.GELU()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         d = x.shape[-1] // 2
-        output_shape = (x.shape[:-1] + (d, ))
-        out = torch.empty(output_shape, dtype=x.dtype, device=x.device)
-        if self.approximate == "none":
-            ops.gelu_and_mul(out, x)
-        elif self.approximate == "tanh":
-            ops.gelu_tanh_and_mul(out, x)
-        return out
-
-    def extra_repr(self) -> str:
-        return f'approximate={repr(self.approximate)}'
+        return self.gelu(x[..., :d]) * x[..., d:]
 
 
 class NewGELU(nn.Module):

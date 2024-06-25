@@ -143,6 +143,7 @@ class UsageMessage:
                            extra_kvs: Dict[str, Any]) -> None:
         # Platform information
         if torch.cuda.is_available():
+            torch.cuda.set_device(0)
             device_property = torch.cuda.get_device_properties(0)
             self.gpu_count = torch.cuda.device_count()
             self.gpu_type = device_property.name

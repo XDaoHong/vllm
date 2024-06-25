@@ -1,5 +1,5 @@
 """CacheEngine class for managing the KV cache."""
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import torch
 
@@ -53,18 +53,22 @@ class CacheEngine:
         self,
         num_blocks: int,
         device: str,
-    ) -> List[torch.Tensor]:
+    ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
         """Allocates KV cache on the specified device."""
         kv_cache_shape = self.attn_backend.get_kv_cache_shape(
             num_blocks, self.block_size, self.num_heads, self.head_size)
         pin_memory = is_pin_memory_available() if device == "cpu" else False
-        kv_cache: List[torch.Tensor] = []
+        kv_cache: List[Tuple[torch.Tensor, torch.Tensor]] = []
         for _ in range(self.num_layers):
-            kv_cache.append(
-                torch.empty(kv_cache_shape,
+            key = torch.empty(kv_cache_shape,
                             dtype=self.dtype,
                             pin_memory=pin_memory,
-                            device=device))
+                            device=device)
+            value = torch.empty(kv_cache_shape,
+                            dtype=self.dtype,
+                            pin_memory=pin_memory,
+                            device=device)
+            kv_cache.append((key, value))
         return kv_cache
 
     def swap_in(self, src_to_dst: Dict[int, int]) -> None:

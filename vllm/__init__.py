@@ -1,4 +1,7 @@
 """vLLM: a high-throughput and memory-efficient inference engine for LLMs"""
+import torch
+import torch_npu
+from torch_npu.contrib import transfer_to_npu
 
 from vllm.engine.arg_utils import AsyncEngineArgs, EngineArgs
 from vllm.engine.async_llm_engine import AsyncLLMEngine

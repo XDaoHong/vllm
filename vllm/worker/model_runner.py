@@ -6,6 +6,7 @@ from typing import Dict, List, NamedTuple, Optional, Set, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
+import math
 
 from vllm.attention import (AttentionMetadata, AttentionMetadataPerStage,
                             get_attn_backend)
@@ -25,7 +26,9 @@ from vllm.sampling_params import SamplingParams
 from vllm.sequence import (MultiModalData, SamplerOutput, SequenceData,
                            SequenceGroupMetadata)
 from vllm.utils import (CudaMemoryProfiler, get_kv_cache_torch_dtype, is_hip,
-                        is_pin_memory_available, make_tensor_with_pad)
+                        is_pin_memory_available, make_tensor_with_pad,
+                        make_list_with_pad, pad_to_max_length)
+from vllm.npu_envs import ENV
 
 logger = init_logger(__name__)
 
@@ -215,9 +218,9 @@ class ModelRunner:
     def set_block_size(self, block_size: int) -> None:
         self.block_size = block_size
 
-        self.graph_block_tables = np.zeros(
-            (max(_BATCH_SIZES_TO_CAPTURE), self.get_max_block_per_batch()),
-            dtype=np.int32)
+        # self.graph_block_tables = np.zeros(
+        #     (max(_BATCH_SIZES_TO_CAPTURE), self.get_max_block_per_batch()),
+        #     dtype=np.int32)
 
     def get_max_block_per_batch(self) -> int:
         block_size = self.block_size
@@ -227,9 +230,10 @@ class ModelRunner:
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> PreparePromptMetadata:
-        input_tokens: List[int] = []
-        input_positions: List[int] = []
-        slot_mapping: List[int] = []
+        input_tokens: List[List[int]] = []
+        input_positions: List[List[int]] = []
+        slot_mapping: List[List[int]] = []
+        slot_indices: List[List[List[int]]] = []
         lora_index_mapping: List[int] = []
         lora_prompt_mapping: List[int] = []
         lora_requests: Set[LoRARequest] = set()
@@ -292,10 +296,10 @@ class ModelRunner:
             context_lens.append(context_len)
             query_lens.append(seq_len - context_len)
 
-            input_tokens.extend(prompt_tokens)
+            input_tokens.append(prompt_tokens)
             # NOTE(woosuk): Here we assume that the first token in the prompt
             # is always the first token in the sequence.
-            input_positions.extend(list(range(context_len, seq_len)))
+            input_positions.append(list(range(context_len, seq_len)))
             lora_id = seq_group_metadata.lora_int_id
 
             if lora_id > 0:
@@ -314,8 +318,11 @@ class ModelRunner:
             if seq_group_metadata.block_tables is None:
                 # During memory profiling, the block tables are not initialized
                 # yet. In this case, we just use a dummy slot mapping.
-                slot_mapping.extend([_PAD_SLOT_ID] * seq_len)
+                slot_mapping.append([_PAD_SLOT_ID] * seq_len)
                 continue
+
+            slot_mapping.append([])
+            slot_indices.append([])
 
             # Compute the slot mapping.
             block_table = seq_group_metadata.block_tables[seq_id]
@@ -334,13 +341,14 @@ class ModelRunner:
 
             for i in range(context_len, seq_len):
                 if i < start_idx:
-                    slot_mapping.append(_PAD_SLOT_ID)
+                    slot_mapping[-1].append(_PAD_SLOT_ID)
                     continue
 
                 block_number = block_table[i // self.block_size]
                 block_offset = i % self.block_size
                 slot = block_number * self.block_size + block_offset
-                slot_mapping.append(slot)
+                slot_mapping[-1].append(slot)
+                slot_indices[-1].append([block_number, block_offset])
 
         max_query_len = max(query_lens)
         max_seq_len = max(seq_lens)
@@ -369,6 +377,17 @@ class ModelRunner:
             device=self.device,
         )
 
+        input_tokens = make_list_with_pad(input_tokens, max_len=max_seq_len, pad=0)
+        input_positions = make_list_with_pad(input_positions, max_len=max_seq_len, pad=0)
+        slot_mapping = make_list_with_pad(slot_mapping, max_len=max_seq_len, pad=_PAD_SLOT_ID)
+
+        pad_slot_indices = []
+        for indices in slot_indices:
+            pad_slot_indices += indices
+            if len(indices) < max_seq_len:
+                pad_slot_indices += [[np.iinfo(np.int_).max, 0]] * (max_seq_len - len(indices))
+        slot_indices = torch.tensor(pad_slot_indices, dtype=torch.int64, device=self.device)
+
         # Query length can be shorter than key (i.e., prompt) when prefill
         # is chunked or prefix cached.
         query_lens_tensor = torch.tensor(query_lens,
@@ -395,25 +414,26 @@ class ModelRunner:
                      dtype=seq_start_loc.dtype,
                      out=seq_start_loc[1:])
 
-        if self.attn_backend is FlashInferBackend:
-            attn_metadata = self.attn_backend.make_metadata(
-                is_prompt=True,
-                use_cuda_graph=False,
-                seq_start_loc=seq_start_loc,
-                max_seq_len=max_seq_len,
-                block_tables=block_tables)
-        else:
-            attn_metadata = self.attn_backend.make_metadata(
-                is_prompt=True,
-                seq_lens=seq_lens,
-                seq_lens_tensor=seq_lens_tensor,
-                max_query_len=max_query_len,
-                max_seq_len=max_seq_len,
-                subquery_start_loc=subquery_start_loc,
-                seq_start_loc=seq_start_loc,
-                context_lens_tensor=context_lens_tensor,
-                block_tables=block_tables,
-                use_cuda_graph=False,
+        # if self.attn_backend is FlashInferBackend:
+        #     attn_metadata = self.attn_backend.make_metadata(
+        #         is_prompt=True,
+        #         use_cuda_graph=False,
+        #         seq_start_loc=seq_start_loc,
+        #         max_seq_len=max_seq_len,
+        #         block_tables=block_tables)
+        # else:
+        attn_metadata = self.attn_backend.make_metadata(
+            is_prompt=True,
+            seq_lens=seq_lens,
+            seq_lens_tensor=seq_lens_tensor,
+            max_query_len=max_query_len,
+            max_seq_len=max_seq_len,
+            subquery_start_loc=subquery_start_loc,
+            seq_start_loc=seq_start_loc,
+            context_lens_tensor=context_lens_tensor,
+            block_tables=block_tables,
+            use_cuda_graph=False,
+            slot_indices = slot_indices,
             )
 
         return PreparePromptMetadata(
@@ -433,9 +453,10 @@ class ModelRunner:
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> PrepareDecodeMetadata:
-        input_tokens: List[int] = []
-        input_positions: List[int] = []
-        slot_mapping: List[int] = []
+        input_tokens: List[List[int]] = []
+        input_positions: List[List[int]] = []
+        slot_mapping: List[List[int]] = []
+        slot_indices: List[List[int]] = []
         seq_lens: List[int] = []
         block_tables: List[List[int]] = []
         lora_index_mapping: List[int] = []
@@ -476,11 +497,11 @@ class ModelRunner:
             for seq_id in seq_ids:
                 seq_data = seq_group_metadata.seq_data[seq_id]
                 generation_token = seq_data.get_last_token_id()
-                input_tokens.append(generation_token)
+                input_tokens.append([generation_token])
 
                 seq_len = seq_data.get_len()
                 position = seq_len - 1
-                input_positions.append(position)
+                input_positions.append([position])
 
                 seq_len = seq_len if self.sliding_window is None else min(
                     seq_len, self.sliding_window)
@@ -490,7 +511,8 @@ class ModelRunner:
                 block_number = block_table[position // self.block_size]
                 block_offset = position % self.block_size
                 slot = block_number * self.block_size + block_offset
-                slot_mapping.append(slot)
+                slot_mapping.append([slot])
+                slot_indices.append([block_number, block_offset])
                 lora_index_mapping.append(lora_id)
                 lora_prompt_mapping.append(lora_id)
 
@@ -512,95 +534,108 @@ class ModelRunner:
         # For decoding requests, batch_size == input_tokens.
         batch_size = len(input_tokens)
         max_seq_len = max(seq_lens)
-        use_captured_graph = (not self.model_config.enforce_eager
-                              and batch_size <= _BATCH_SIZES_TO_CAPTURE[-1]
-                              and max_seq_len <= self.max_seq_len_to_capture)
-        if use_captured_graph:
+        max_block_table_len = max(len(block_table) for block_table in block_tables)
+        # use_captured_graph = (not self.model_config.enforce_eager
+        #                       and batch_size <= _BATCH_SIZES_TO_CAPTURE[-1]
+        #                       and max_seq_len <= self.max_seq_len_to_capture)
+        if not self.model_config.enforce_eager:
+            max_block_table_len = math.ceil(self.scheduler_config.max_model_len / self.block_size)
             graph_batch_size = _get_graph_batch_size(batch_size)
-            assert graph_batch_size >= batch_size
+            # assert graph_batch_size >= batch_size
             for _ in range(graph_batch_size - batch_size):
-                input_tokens.append(0)
-                input_positions.append(0)
-                slot_mapping.append(_PAD_SLOT_ID)
-                seq_lens.append(1)
+                input_tokens.append([])
+                input_positions.append([])
+                slot_mapping.append([])
                 block_tables.append([])
-                lora_index_mapping.append(0)
-            batch_size = graph_batch_size
+                # lora_index_mapping.append(0)
+                slot_indices.append([_PAD_SLOT_ID, _PAD_SLOT_ID])
+            # batch_size = graph_batch_size
+
+            for _ in range(max(ENV.decode_gear_list) - batch_size):
+                seq_lens.append(2)
+
+            input_tokens = _with_pad(input_tokens, max_len=1, pad=0)
+            input_positions = _with_pad(input_positions, max_len=1, pad=0)
+            slot_mapping = _with_pad(slot_mapping, max_len=1, pad=_PAD_SLOT_ID)
 
         seq_lens_tensor = torch.tensor(seq_lens,
                                        dtype=torch.int,
                                        device=self.device)
 
-        if use_captured_graph:
-            # When using cuda-graph all these tensors should be
-            # padded.
-            assert seq_lens_tensor.shape[0] == len(input_tokens)
-            assert seq_lens_tensor.shape[0] == len(input_positions)
-            assert seq_lens_tensor.shape[0] == len(slot_mapping)
+        # if use_captured_graph:
+        #     # When using cuda-graph all these tensors should be
+        #     # padded.
+        #     assert seq_lens_tensor.shape[0] == len(input_tokens)
+        #     assert seq_lens_tensor.shape[0] == len(input_positions)
+        #     assert seq_lens_tensor.shape[0] == len(slot_mapping)
+        #
+        #     # The shape of graph_block_tables is
+        #     # [max batch size, max context len // block size].
+        #     input_block_tables = self.graph_block_tables[:batch_size]
+        #     for i, block_table in enumerate(block_tables):
+        #         if block_table:
+        #             input_block_tables[i, :len(block_table)] = block_table
+        #     block_tables = torch.tensor(input_block_tables, device=self.device)
+        # else:
+        #     max_block_table_len = max(
+        #         len(block_table) for block_table in block_tables)
+        slot_indices = torch.tensor(slot_indices, dtype=torch.long, device=self.device)
 
-            # The shape of graph_block_tables is
-            # [max batch size, max context len // block size].
-            input_block_tables = self.graph_block_tables[:batch_size]
-            for i, block_table in enumerate(block_tables):
-                if block_table:
-                    input_block_tables[i, :len(block_table)] = block_table
-            block_tables = torch.tensor(input_block_tables, device=self.device)
-        else:
-            max_block_table_len = max(
-                len(block_table) for block_table in block_tables)
-            block_tables = make_tensor_with_pad(
-                block_tables,
-                max_len=max_block_table_len,
-                pad=0,
-                dtype=torch.int,
-                device=self.device,
-            )
+        block_tables = make_tensor_with_pad(
+            block_tables,
+            max_len=max_block_table_len,
+            pad=0,
+            dtype=torch.int,
+            device=self.device,
+        )
 
-        if self.attn_backend is FlashInferBackend:
-            if not hasattr(self, "flashinfer_workspace_buffer"):
-                # Allocate 16MB workspace buffer
-                # Follow the example of flashinfer: https://docs.flashinfer.ai/api/python/decode.html
-                self.flashinfer_workspace_buffer = torch.empty(
-                    16 * 1024 * 1024, dtype=torch.uint8, device=self.device)
-            paged_kv_indptr = torch.tensor(paged_kv_indptr,
-                                           dtype=torch.int,
-                                           device=self.device)
-            paged_kv_indices = torch.tensor(paged_kv_indices,
-                                            dtype=torch.int,
-                                            device=self.device)
-            paged_kv_last_page_len = torch.tensor(paged_kv_last_page_len,
-                                                  dtype=torch.int,
-                                                  device=self.device)
-            kv_cache_dtype = get_kv_cache_torch_dtype(self.kv_cache_dtype,
-                                                      self.model_config.dtype)
-
-            attn_metadata = self.attn_backend.make_metadata(
-                is_prompt=False,
-                use_cuda_graph=False,
-                workspace_buffer=self.flashinfer_workspace_buffer,
-                paged_kv_indptr=paged_kv_indptr,
-                paged_kv_indices=paged_kv_indices,
-                paged_kv_last_page_len=paged_kv_last_page_len,
-                num_qo_heads=self.model_config.get_num_attention_heads(
-                    self.parallel_config),
-                num_kv_heads=self.model_config.get_num_kv_heads(
-                    self.parallel_config),
-                head_dim=self.model_config.get_head_size(),
-                page_size=self.block_size,
-                data_type=kv_cache_dtype)
-        else:
-            attn_metadata = self.attn_backend.make_metadata(
-                is_prompt=False,
-                seq_lens=None,
-                seq_lens_tensor=seq_lens_tensor,
-                max_query_len=None,
-                max_seq_len=max_seq_len,
-                subquery_start_loc=None,
-                seq_start_loc=None,
-                context_lens_tensor=None,
-                block_tables=block_tables,
-                use_cuda_graph=use_captured_graph,
-            )
+        # if self.attn_backend is FlashInferBackend:
+        #     if not hasattr(self, "flashinfer_workspace_buffer"):
+        #         # Allocate 16MB workspace buffer
+        #         # Follow the example of flashinfer: https://docs.flashinfer.ai/api/python/decode.html
+        #         self.flashinfer_workspace_buffer = torch.empty(
+        #             16 * 1024 * 1024, dtype=torch.uint8, device=self.device)
+        #     paged_kv_indptr = torch.tensor(paged_kv_indptr,
+        #                                    dtype=torch.int,
+        #                                    device=self.device)
+        #     paged_kv_indices = torch.tensor(paged_kv_indices,
+        #                                     dtype=torch.int,
+        #                                     device=self.device)
+        #     paged_kv_last_page_len = torch.tensor(paged_kv_last_page_len,
+        #                                           dtype=torch.int,
+        #                                           device=self.device)
+        #     kv_cache_dtype = get_kv_cache_torch_dtype(self.kv_cache_dtype,
+        #                                               self.model_config.dtype)
+        #
+        #     attn_metadata = self.attn_backend.make_metadata(
+        #         is_prompt=False,
+        #         use_cuda_graph=False,
+        #         workspace_buffer=self.flashinfer_workspace_buffer,
+        #         paged_kv_indptr=paged_kv_indptr,
+        #         paged_kv_indices=paged_kv_indices,
+        #         paged_kv_last_page_len=paged_kv_last_page_len,
+        #         num_qo_heads=self.model_config.get_num_attention_heads(
+        #             self.parallel_config),
+        #         num_kv_heads=self.model_config.get_num_kv_heads(
+        #             self.parallel_config),
+        #         head_dim=self.model_config.get_head_size(),
+        #         page_size=self.block_size,
+        #         data_type=kv_cache_dtype)
+        # else:
+        attn_metadata = self.attn_backend.make_metadata(
+            is_prompt=False,
+            seq_lens=seq_lens_tensor.cpu().tolist(),
+            seq_lens_tensor=seq_lens_tensor,
+            max_query_len=None,
+            max_seq_len=max_seq_len,
+            subquery_start_loc=None,
+            seq_start_loc=None,
+            context_lens_tensor=None,
+            block_tables=block_tables,
+            use_cuda_graph=(not self.model_config.enforce_eager),
+            # slot_mapping=slot_mapping,
+            slot_indices=slot_indices,
+        )
         return PrepareDecodeMetadata(
             input_tokens=input_tokens,
             input_positions=input_positions,
@@ -793,10 +828,30 @@ class ModelRunner:
         prefill_meta = attn_metadata.prefill_metadata
         decode_meta = attn_metadata.decode_metadata
         if prefill_meta is None and decode_meta.use_cuda_graph:
-            graph_batch_size = input_tokens.shape[0]
-            model_executable = self.graph_runners[graph_batch_size]
-        else:
-            model_executable = self.model
+            if len(ENV.decode_gear_list) > 1:
+                from torchair.inference import set_dim_gears
+                set_dim_gears(input_tokens, {0: ENV.decode_gear_list})
+                set_dim_gears(input_positions, {0: ENV.decode_gear_list})
+                if decode_meta.block_tables is not None:
+                    set_dim_gears(decode_meta.block_tables, {0: ENV.decode_gear_list})
+                if decode_meta.slot_indices is not None:
+                    set_dim_gears(decode_meta.slot_indices, {0: ENV.decode_gear_list})
+            else:
+                torch._dynamo.mark_static(input_tokens)
+                torch._dynamo.mark_static(input_positions)
+                if decode_meta.block_tables is not None:
+                    torch._dynamo.mark_static(decode_meta.block_tables)
+                if decode_meta.slot_indices is not None:
+                    torch._dynamo.mark_static(decode_meta.slot_indices)
+                for i in range(len(kv_caches)):
+                    if kv_caches[i][0] is not None:
+                        torch._dynamo.mark_static(kv_caches[i][0])
+                    if kv_caches[i][1] is not None:
+                        torch._dynamo.mark_static(kv_caches[i][1])
+                torch._dynamo.mark_static(self.model.model.layers[0].self_attn.rotary_emb.sin)
+                torch._dynamo.mark_static(self.model.model.layers[0].self_attn.rotary_emb.cos)
+
+        model_executable = self.model
         execute_model_kwargs = {
             "input_ids": input_tokens,
             "positions": input_positions,
@@ -1136,18 +1191,14 @@ def _maybe_pynccl():
 
 
 def _get_graph_batch_size(batch_size: int) -> int:
-    """Returns the padded batch size given actual batch size.
+    for gear in ENV.decode_gear_list:
+        if gear >= batch_size:
+            return gear
+    raise ValueError(f"decode input batch size {batch_size} exceeds maximum gear {ENV.decode_gear_list}")
 
-    Batch sizes are 1, 2, 4, _BATCH_SIZE_ALIGNMENT,
-    2*_BATCH_SIZE_ALIGNMENT, 3*_BATCH_SIZE_ALIGNMENT...
-    """
-    if batch_size <= 2:
-        return batch_size
-    elif batch_size <= 4:
-        return 4
-    else:
-        return ((batch_size + _BATCH_SIZE_ALIGNMENT - 1) //
-                _BATCH_SIZE_ALIGNMENT * _BATCH_SIZE_ALIGNMENT)
+
+def _with_pad(x: List[List[int]], max_len: int, pad: int) -> List[List[int]]:
+    return [pad_to_max_length(x_i, max_len, pad) for x_i in x]
 
 
 def _prepare_fake_inputs(

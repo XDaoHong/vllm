@@ -200,9 +200,10 @@ def get_cpu_world_group():
 
 def get_tensor_model_parallel_group():
     """Get the tensor model parallel group the caller rank belongs to."""
-    assert _TP_DEVICE_GROUP is not None, (
-        "tensor model parallel group is not initialized")
-    return _TP_DEVICE_GROUP
+    # assert _TP_DEVICE_GROUP is not None, (
+    #     "tensor model parallel group is not initialized")
+    # return _TP_DEVICE_GROUP
+    return None
 
 
 def get_tensor_model_parallel_cpu_group():
