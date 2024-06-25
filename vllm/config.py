@@ -663,15 +663,16 @@ class DeviceConfig:
 
     def __init__(self, device: str = "auto") -> None:
         if device == "auto":
+            self.device_type = "npu"
             # Automated device type detection
-            if is_neuron():
-                self.device_type = "neuron"
-            elif is_cpu():
-                self.device_type = "cpu"
-            else:
-                # We don't call torch.cuda.is_available() here to
-                # avoid initializing CUDA before workers are forked
-                self.device_type = "cuda"
+            # if is_neuron():
+            #     self.device_type = "neuron"
+            # elif is_cpu():
+            #     self.device_type = "cpu"
+            # else:
+            #     # We don't call torch.cuda.is_available() here to
+            #     # avoid initializing CUDA before workers are forked
+            #     self.device_type = "cuda"
         else:
             # Device type is assigned explicitly
             self.device_type = device

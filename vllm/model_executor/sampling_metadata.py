@@ -4,7 +4,6 @@ from typing import Dict, List, Optional, Tuple
 
 import torch
 
-from vllm.model_executor.layers.ops.sample import get_num_triton_sampler_splits
 from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.sequence import SequenceData, SequenceGroupMetadata
 from vllm.utils import (async_tensor_h2d, is_pin_memory_available,
@@ -176,6 +175,8 @@ def _prepare_seq_groups(
     # Used for selected_token_indices.
     model_output_idx = 0
 
+    max_query_len = max(query_lens) if len(query_lens) else 0
+
     # Sampling type -> (
     # indices to sample/prompt logprob within pruned output logits,
     # indices to sample within pruned logits)
@@ -211,18 +212,20 @@ def _prepare_seq_groups(
 
             num_prompts += 1
             num_prefill_sample = len(seq_ids)
-            assert num_prefill_sample == 1
-            assert query_lens is not None and seq_lens is not None
+            # assert num_prefill_sample == 1
+            # assert query_lens is not None and seq_lens is not None
             query_len, seq_len = query_lens[i], seq_lens[i]
             # If we need sampling, exclude num_prefill_sample tokens from
             # prompt logprob.
             prompt_logprob_len = (query_len - num_prefill_sample
                                   if do_sample else query_len)
             sample_len = num_prefill_sample if do_sample else 0
+            padding_len = max_query_len - prompt_logprob_len - sample_len
         else:
             # Decode
             prompt_logprob_len = 0
             sample_len = len(seq_ids) if do_sample else 0
+            padding_len = 0
 
         # Update indices to select from the model output.
         """
@@ -240,7 +243,7 @@ def _prepare_seq_groups(
         if do_sample:
             selected_token_indices.extend(
                 range(model_output_idx, model_output_idx + sample_len))
-        model_output_idx += sample_len
+        model_output_idx += sample_len + padding_len
 
         # We now find indices for logprob computation and sampling.
         """
@@ -336,8 +339,7 @@ class SamplingTensors:
         do_min_p = False
 
         # We need one base seed per Triton slice.
-        seeds_to_generate = (extra_seeds_to_generate +
-                             get_num_triton_sampler_splits(vocab_size))
+        seeds_to_generate = (extra_seeds_to_generate + 1)
 
         assert sampling_metadata.seq_groups is not None
         for seq_group in sampling_metadata.seq_groups:
