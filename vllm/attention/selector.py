@@ -22,33 +22,35 @@ class _Backend(enum.Enum):
 
 @lru_cache(maxsize=None)
 def get_attn_backend(dtype: torch.dtype) -> Type[AttentionBackend]:
-    backend = _which_attn_to_use(dtype)
-    if backend == _Backend.FLASH_ATTN:
-        logger.info("Using FlashAttention-2 backend.")
-        from vllm.attention.backends.flash_attn import (  # noqa: F401
-            FlashAttentionBackend)
-        return FlashAttentionBackend
-    elif backend == _Backend.XFORMERS:
-        logger.info("Using XFormers backend.")
-        from vllm.attention.backends.xformers import (  # noqa: F401
-            XFormersBackend)
-        return XFormersBackend
-    elif backend == _Backend.ROCM_FLASH:
-        logger.info("Using ROCmFlashAttention backend.")
-        from vllm.attention.backends.rocm_flash_attn import (  # noqa: F401
-            ROCmFlashAttentionBackend)
-        return ROCmFlashAttentionBackend
-    elif backend == _Backend.TORCH_SDPA:
-        logger.info("Using Torch SDPA backend.")
-        from vllm.attention.backends.torch_sdpa import TorchSDPABackend
-        return TorchSDPABackend
-    elif backend == _Backend.FLASHINFER:
-        logger.info("Using Flashinfer backend.")
-        logger.warning("Eager mode is enforced for the Flashinfer backend. ")
-        from vllm.attention.backends.flashinfer import FlashInferBackend
-        return FlashInferBackend
-    else:
-        raise ValueError("Invalid attention backend.")
+    from vllm.attention.backends.npu_flash_attn import FlashAttentionBackend
+    return FlashAttentionBackend
+    # backend = _which_attn_to_use(dtype)
+    # if backend == _Backend.FLASH_ATTN:
+    #     logger.info("Using FlashAttention-2 backend.")
+    #     from vllm.attention.backends.flash_attn import (  # noqa: F401
+    #         FlashAttentionBackend)
+    #     return FlashAttentionBackend
+    # elif backend == _Backend.XFORMERS:
+    #     logger.info("Using XFormers backend.")
+    #     from vllm.attention.backends.xformers import (  # noqa: F401
+    #         XFormersBackend)
+    #     return XFormersBackend
+    # elif backend == _Backend.ROCM_FLASH:
+    #     logger.info("Using ROCmFlashAttention backend.")
+    #     from vllm.attention.backends.rocm_flash_attn import (  # noqa: F401
+    #         ROCmFlashAttentionBackend)
+    #     return ROCmFlashAttentionBackend
+    # elif backend == _Backend.TORCH_SDPA:
+    #     logger.info("Using Torch SDPA backend.")
+    #     from vllm.attention.backends.torch_sdpa import TorchSDPABackend
+    #     return TorchSDPABackend
+    # elif backend == _Backend.FLASHINFER:
+    #     logger.info("Using Flashinfer backend.")
+    #     logger.warning("Eager mode is enforced for the Flashinfer backend. ")
+    #     from vllm.attention.backends.flashinfer import FlashInferBackend
+    #     return FlashInferBackend
+    # else:
+    #     raise ValueError("Invalid attention backend.")
 
 
 def _which_attn_to_use(dtype: torch.dtype) -> _Backend:

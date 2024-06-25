@@ -537,6 +537,15 @@ def make_tensor_with_pad(
     return torch.tensor(padded_x, dtype=dtype, device=device)
 
 
+def make_list_with_pad(
+    x: List[List[int]],
+    max_len: int,
+    pad: int,
+) -> List[List[int]]:
+    padded_x = [pad_to_max_length(x_i, max_len, pad) for x_i in x]
+    return padded_x
+
+
 def async_tensor_h2d(
     data: list,
     dtype: torch.dtype,

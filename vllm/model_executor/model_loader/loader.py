@@ -26,6 +26,7 @@ from vllm.model_executor.model_loader.weight_utils import (
     get_quant_config, initialize_dummy_weights, np_cache_weights_iterator,
     pt_weights_iterator, safetensors_weights_iterator)
 from vllm.model_executor.models.llava import LlavaForConditionalGeneration
+from vllm.attention.backends.npu_flash_attn import FlashAttentionMetadata
 
 _VISION_MODEL_CLASSES = [
     LlavaForConditionalGeneration,
@@ -77,6 +78,43 @@ def _get_model_initialization_kwargs(
     return extra_kwargs
 
 
+def _warp_class(model_class):
+    class cache_class(model_class):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            import torchair
+            from torchair.configs.compiler_config import CompilerConfig
+            config = CompilerConfig()
+            config.experimental_config.frozen_parameter = True
+            config.experimental_config.tiling_schedule_optimize = True
+            self.cached_decode = torchair.inference.cache_compile(self.decode, config=config, dynamic=True)
+
+        def decode(self, *args, **kwargs):
+            return self._forward(*args, **kwargs)
+
+        def forward(
+            self,
+            input_ids: torch.Tensor,
+            positions: torch.Tensor,
+            kv_caches: List[torch.Tensor],
+            attn_metadata: FlashAttentionMetadata,
+        ) -> torch.Tensor:
+            prefill_meta = attn_metadata.prefill_metadata
+            if prefill_meta is None:
+                return self.cached_decode(input_ids, positions, kv_caches, attn_metadata)
+            return self._forward(input_ids, positions, kv_caches, attn_metadata)
+
+        def _forward(
+            self,
+            input_ids: torch.Tensor,
+            positions: torch.Tensor,
+            kv_caches: List[torch.Tensor],
+            attn_metadata: FlashAttentionMetadata,
+        ) -> torch.Tensor:
+            return self.model(input_ids, positions, kv_caches, attn_metadata)
+
+    return cache_class
+
 def _initialize_model(
         model_config: ModelConfig, load_config: LoadConfig,
         lora_config: Optional[LoRAConfig],
@@ -84,6 +122,9 @@ def _initialize_model(
     """Initialize a model with the given configurations."""
     model_class = get_model_architecture(model_config)[0]
     quant_config = _get_quantization_config(model_config, load_config)
+    if not model_config.enforce_eager:
+        import torchair.ge_concrete_graph.ge_converter.experimental.patch_for_hcom_allreduce
+        model_class = _warp_class(model_class)
 
     return model_class(config=model_config.hf_config,
                        quant_config=quant_config,
@@ -228,14 +269,15 @@ class DefaultModelLoader(BaseModelLoader):
                                                model,
                                                "fall_back_to_pt_during_load",
                                                True)), )
-            for _, module in model.named_modules():
-                quant_method = getattr(module, "quant_method", None)
-                if quant_method is not None:
-                    quant_method.process_weights_after_loading(module)
-                # FIXME: Remove this after Mixtral is updated
-                # to use quant_method.
-                if hasattr(module, "process_weights_after_loading"):
-                    module.process_weights_after_loading()
+            # for _, module in model.named_modules():
+            #     quant_method = getattr(module, "quant_method", None)
+            #     if quant_method is not None:
+            #         quant_method.process_weights_after_loading(module)
+            #     # FIXME: Remove this after Mixtral is updated
+            #     # to use quant_method.
+            #     if hasattr(module, "process_weights_after_loading"):
+            #         module.process_weights_after_loading()
+            model = model.npu()
         return model.eval()
 
 
