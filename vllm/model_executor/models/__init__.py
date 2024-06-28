@@ -31,6 +31,7 @@ _MODELS = {
     "InternLM2ForCausalLM": ("internlm2", "InternLM2ForCausalLM"),
     "JAISLMHeadModel": ("jais", "JAISLMHeadModel"),
     "LlamaForCausalLM": ("llama", "LlamaForCausalLM"),
+    "LlamaA8W8ForCausalLM": ("llama_a8w8", "LlamaForCausalLM"),
     "LlavaForConditionalGeneration":
     ("llava", "LlavaForConditionalGeneration"),
     # For decapoda-research/llama-*
@@ -95,6 +96,7 @@ class ModelRegistry:
                     model_arch, _ROCM_PARTIALLY_SUPPORTED_MODELS[model_arch])
 
         module_name, model_cls_name = _MODELS[model_arch]
+        print(f"module_name:{module_name} model_cls_name:{model_cls_name}")
         module = importlib.import_module(
             f"vllm.model_executor.models.{module_name}")
         return getattr(module, model_cls_name, None)
