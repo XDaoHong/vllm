@@ -96,7 +96,7 @@ class NpuA8W8GPTQLinearMethod(LinearMethodBase):
         del output_size  # Unused.
         output_size_per_partition = sum(output_partition_sizes)
 
-        qweight = Parameter(
+        weight = Parameter(
             torch.empty(
                 output_size_per_partition,
                 input_size_per_partition,
@@ -105,7 +105,7 @@ class NpuA8W8GPTQLinearMethod(LinearMethodBase):
             requires_grad=False,
         )
         set_weight_attrs(
-            qweight, {"output_dim": 0, "input_dim": 1})
+            weight, {"output_dim": 0, "input_dim": 1})
         deq_scale = Parameter(
             torch.empty(
                 output_size_per_partition,
@@ -124,8 +124,8 @@ class NpuA8W8GPTQLinearMethod(LinearMethodBase):
         )
         set_weight_attrs(scales_w, {"output_dim": 0})
 
-        layer.register_parameter("qweight", qweight)
-        set_weight_attrs(qweight, extra_weight_attrs)
+        layer.register_parameter("weight", weight)
+        set_weight_attrs(weight, extra_weight_attrs)
         layer.register_parameter("deq_scale", deq_scale)
         set_weight_attrs(deq_scale, extra_weight_attrs)
         layer.register_parameter("scales_w", scales_w)
@@ -135,16 +135,16 @@ class NpuA8W8GPTQLinearMethod(LinearMethodBase):
               layer: torch.nn.Module,
               x: torch.Tensor,
               bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-        qweight = layer.qweight
-        out_shape = x.shape[:-1] + (qweight.shape[0], )
+        weight = layer.weight
+        out_shape = x.shape[:-1] + (weight.shape[0], )
         reshaped_x = x.reshape(-1, x.shape[-1])
 
         y = torch_npu.npu_quant_matmul(reshaped_x,
-                                       layer.qweight.transpose(0, 1),
-                                       qweight.deq_scale,
+                                       layer.weight.transpose(0, 1),
+                                       layer.deq_scale,
                                        offset=None,
                                        bias=bias,
-                                       output_dtype=self.float16)
+                                       output_dtype=torch.float16)
 
         return y.view(out_shape)
 
@@ -185,7 +185,7 @@ class ColumnParallelA8W8Linear(LinearBase):
 
         self.gather_output = gather_output
         self.bias_dtype = torch.float16
-        print(f"column param dtype:{self.params_dtype}")
+        # print(f"column param dtype:{self.params_dtype}")
         if self.params_dtype == torch.int8:
             self.bias_dtype = torch.int32
 
@@ -193,7 +193,7 @@ class ColumnParallelA8W8Linear(LinearBase):
         tp_size = get_tensor_model_parallel_world_size()
         assert self.quant_method is not None
         self.output_size_per_partition = divide(self.output_size, tp_size)
-        print(f"column output_size:{self.output_size} tp_size:{tp_size} ouput_per_partition:{self.output_size_per_partition}")
+        # print(f"column output_size:{self.output_size} tp_size:{tp_size} ouput_per_partition:{self.output_size_per_partition}")
         self.output_partition_sizes = [self.output_size_per_partition]
         # If QKV or MergedColumn, use output size of each partition.
         if hasattr(self, "output_sizes"):
@@ -298,7 +298,7 @@ class RowParallelA8W8Linear(LinearBase):
                  bias: bool = True,
                  input_is_parallel: bool = True,
                  skip_bias_add: bool = False,
-                 params_dtype: Optional[torch.dtype] = None,
+                 params_dtype: Optional[torch.dtype] = torch.int8,
                  reduce_results: bool = True,
                  quant_config: Optional[QuantizationConfig] = None):
         super().__init__(input_size, output_size, skip_bias_add, params_dtype,
@@ -308,14 +308,14 @@ class RowParallelA8W8Linear(LinearBase):
         self.reduce_results = reduce_results
 
         self.bias_dtype = torch.float16
-        print(f"row param dtype:{self.params_dtype}")
+        # print(f"row param dtype:{self.params_dtype}")
         if self.params_dtype == torch.int8:
             self.bias_dtype = torch.int32
 
         # Divide the weight matrix along the last dimension.
         self.tp_size = get_tensor_model_parallel_world_size()
         self.input_size_per_partition = divide(input_size, self.tp_size)
-        print(f"row input_size:{input_size} tp_size:{self.tp_size} input_per_partition:{self.input_size_per_partition}")
+        # print(f"row input_size:{input_size} tp_size:{self.tp_size} input_per_partition:{self.input_size_per_partition}")
         assert self.quant_method is not None
         self.quant_method.create_weights(
             layer=self,

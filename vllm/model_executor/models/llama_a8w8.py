@@ -201,7 +201,7 @@ class LlamaAttention(nn.Module):
         q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         attn_output = torch_npu.npu_quantize(attn_output, self.scale_o, self.offset_o, torch.qint8, axis=-1)
-        output, _ = self.o_proj(attn_output)
+        output = self.o_proj(attn_output)
         return output
 
 
@@ -443,6 +443,7 @@ class LlamaA8W8ForCausalLM(nn.Module):
                 if name.endswith(".bias") and name not in params_dict:
                     continue
                 param = params_dict[name]
+                print(f"key:{name} shape:{param.shape} {loaded_weight.shape}")
                 weight_loader = getattr(param, "weight_loader",
                                         default_weight_loader)
                 weight_loader(param, loaded_weight)
