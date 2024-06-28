@@ -80,19 +80,22 @@ class LlamaMLP(nn.Module):
                              "Only silu is supported for now.")
         self.act_fn = nn.SiLU()
 
-        self.scale_up = Parameter(torch.empty(hidden_size, dtype=torch.float32), requires_grad=False)
-        set_weight_attrs(self.scale_up, {"output_dim": 0})
-        self.offset_up = Parameter(torch.empty(hidden_size, dtype=torch.int32), requires_grad=False)
-        set_weight_attrs(self.offset_up, {"output_dim": 0})
-        self.scale_down = Parameter(torch.empty(intermediate_size, dtype=torch.float32), requires_grad=False)
-        set_weight_attrs(self.scale_down, {"output_dim": 0})
-        self.offset_down = Parameter(torch.empty(intermediate_size, dtype=torch.int32), requires_grad=False)
-        set_weight_attrs(self.offset_down, {"output_dim": 0})
+        # self.scale_up = Parameter(torch.empty(hidden_size, dtype=torch.float32), requires_grad=False)
+        # set_weight_attrs(self.scale_up, {"output_dim": 0})
+        # self.offset_up = Parameter(torch.empty(hidden_size, dtype=torch.int32), requires_grad=False)
+        # set_weight_attrs(self.offset_up, {"output_dim": 0})
+        # self.scale_down = Parameter(torch.empty(intermediate_size, dtype=torch.float32), requires_grad=False)
+        # set_weight_attrs(self.scale_down, {"output_dim": 0})
+        # self.offset_down = Parameter(torch.empty(intermediate_size, dtype=torch.int32), requires_grad=False)
+        # set_weight_attrs(self.offset_down, {"output_dim": 0})
 
     def forward(self, x):
-        x = torch_npu.npu_quantize(x, self.scale_up, self.offset_up, torch.qint8, axis=-1)
+        # x = torch_npu.npu_quantize(x, self.scale_up, self.offset_up, torch.qint8, axis=-1)
+        # x = self.act_fn(self.gate_proj(x)) * self.up_proj(x)
+        # x = torch_npu.npu_quantize(x, self.scale_down, self.offset_down, torch.qint8, axis=-1)
+        # return self.down_proj(x)
+
         x = self.act_fn(self.gate_proj(x)) * self.up_proj(x)
-        x = torch_npu.npu_quantize(x, self.scale_down, self.offset_down, torch.qint8, axis=-1)
         return self.down_proj(x)
 
 
@@ -177,14 +180,14 @@ class LlamaAttention(nn.Module):
                               num_kv_heads=self.num_kv_heads,
                               sliding_window=sliding_window)
 
-        self.scale_qkv = Parameter(torch.empty(self.hidden_size, dtype=torch.float32), requires_grad=False)
-        set_weight_attrs(self.scale_qkv, {"output_dim": 0})
-        self.offset_qkv = Parameter(torch.empty(self.hidden_size, dtype=torch.int32), requires_grad=False)
-        set_weight_attrs(self.offset_qkv, {"output_dim": 0})
-        self.scale_o = Parameter(torch.empty(self.q_size, dtype=torch.float32), requires_grad=False)
-        set_weight_attrs(self.scale_o, {"output_dim": 0})
-        self.offset_o = Parameter(torch.empty(self.q_size, dtype=torch.int32), requires_grad=False)
-        set_weight_attrs(self.offset_o, {"output_dim": 0})
+        # self.scale_qkv = Parameter(torch.empty(self.hidden_size, dtype=torch.float32), requires_grad=False)
+        # set_weight_attrs(self.scale_qkv, {"output_dim": 0})
+        # self.offset_qkv = Parameter(torch.empty(self.hidden_size, dtype=torch.int32), requires_grad=False)
+        # set_weight_attrs(self.offset_qkv, {"output_dim": 0})
+        # self.scale_o = Parameter(torch.empty(self.q_size, dtype=torch.float32), requires_grad=False)
+        # set_weight_attrs(self.scale_o, {"output_dim": 0})
+        # self.offset_o = Parameter(torch.empty(self.q_size, dtype=torch.int32), requires_grad=False)
+        # set_weight_attrs(self.offset_o, {"output_dim": 0})
 
     def forward(
         self,
@@ -194,13 +197,13 @@ class LlamaAttention(nn.Module):
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         bsz, q_len, _ = hidden_states.size()
-        hidden_states = torch_npu.npu_quantize(hidden_states, self.scale_qkv, self.offset_qkv, torch.qint8, axis=-1)
+        # hidden_states = torch_npu.npu_quantize(hidden_states, self.scale_qkv, self.offset_qkv, torch.qint8, axis=-1)
         q = self.q_proj(hidden_states)
         k = self.k_proj(hidden_states)
         v = self.v_proj(hidden_states)
         q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
-        attn_output = torch_npu.npu_quantize(attn_output, self.scale_o, self.offset_o, torch.qint8, axis=-1)
+        # attn_output = torch_npu.npu_quantize(attn_output, self.scale_o, self.offset_o, torch.qint8, axis=-1)
         output = self.o_proj(attn_output)
         return output
 
