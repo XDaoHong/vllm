@@ -32,7 +32,7 @@ STR_DTYPE_TO_TORCH_DTYPE = {
     "bfloat16": torch.bfloat16,
     "float": torch.float,
     "fp8": torch.uint8,
-    "int8", torch.int8,
+    "int8": torch.int8,
 }
 
 

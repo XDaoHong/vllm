@@ -34,9 +34,6 @@ from vllm.distributed import (get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size)
 from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.layernorm import RMSNorm
-from vllm.model_executor.layers.linear import (MergedColumnParallelLinear,
-                                               QKVParallelLinear,
-                                               RowParallelLinear)
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig)
@@ -65,13 +62,13 @@ class LlamaMLP(nn.Module):
     ) -> None:
         super().__init__()
         self.gate_proj = ColumnParallelA8W8Linear(
-            input_size=hidden_size,
-            output_sizes=intermediate_size,
+            hidden_size,
+            intermediate_size,
             bias=True,
             quant_config=quant_config)
         self.up_proj = ColumnParallelA8W8Linear(
-            input_size=hidden_size,
-            output_sizes=intermediate_size,
+            hidden_size,
+            intermediate_size,
             bias=True,
             quant_config=quant_config)
         self.down_proj = RowParallelA8W8Linear(intermediate_size,
@@ -146,18 +143,18 @@ class LlamaAttention(nn.Module):
         self.kv_scale = 1.0
 
         self.q_proj = ColumnParallelA8W8Linear(
-            input_size=hidden_size,
-            output_sizes=self.total_num_heads * self.head_dim,
+            hidden_size,
+            self.total_num_heads * self.head_dim,
             bias=bias,
             quant_config=quant_config)
         self.k_proj = ColumnParallelA8W8Linear(
-            input_size=hidden_size,
-            output_sizes=self.total_num_kv_heads * self.head_dim,
+            hidden_size,
+            self.total_num_kv_heads * self.head_dim,
             bias=bias,
             quant_config=quant_config)
         self.v_proj = ColumnParallelA8W8Linear(
-            input_size=hidden_size,
-            output_sizes=self.total_num_kv_heads * self.head_dim,
+            hidden_size,
+            self.total_num_kv_heads * self.head_dim,
             bias=bias,
             quant_config=quant_config)
         self.o_proj = RowParallelA8W8Linear(
