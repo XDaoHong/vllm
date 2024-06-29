@@ -34,6 +34,9 @@ from vllm.distributed import (get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size)
 from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.layernorm import RMSNorm
+from vllm.model_executor.layers.linear import (MergedColumnParallelLinear,
+                                               QKVParallelLinear,
+                                               RowParallelLinear)
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig)
@@ -96,7 +99,8 @@ class LlamaMLP(nn.Module):
         # return self.down_proj(x)
 
         x = self.act_fn(self.gate_proj(x)) * self.up_proj(x)
-        return self.down_proj(x)
+        x = self.down_proj(x)
+        return x
 
 
 class LlamaAttention(nn.Module):
@@ -148,22 +152,22 @@ class LlamaAttention(nn.Module):
         self.q_proj = ColumnParallelA8W8Linear(
             hidden_size,
             self.total_num_heads * self.head_dim,
-            bias=bias,
+            bias=True,
             quant_config=quant_config)
         self.k_proj = ColumnParallelA8W8Linear(
             hidden_size,
             self.total_num_kv_heads * self.head_dim,
-            bias=bias,
+            bias=True,
             quant_config=quant_config)
         self.v_proj = ColumnParallelA8W8Linear(
             hidden_size,
             self.total_num_kv_heads * self.head_dim,
-            bias=bias,
+            bias=True,
             quant_config=quant_config)
         self.o_proj = RowParallelA8W8Linear(
             self.total_num_heads * self.head_dim,
             hidden_size,
-            bias=bias,
+            bias=True,
             quant_config=quant_config,
         )
 
