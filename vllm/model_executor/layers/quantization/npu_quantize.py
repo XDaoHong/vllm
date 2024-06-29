@@ -125,17 +125,17 @@ class NpuA8W8GPTQLinearMethod(LinearMethodBase):
         set_weight_attrs(scales_w, {"output_dim": 0})
 
         scale_x = Parameter(torch.empty(input_size_per_partition, dtype=torch.float32), requires_grad=False)
-        set_weight_attrs(scale_up, {"output_dim": 0})
+        set_weight_attrs(scale_x, {"output_dim": 0})
         offset_x = Parameter(torch.empty(input_size_per_partition, dtype=torch.int32), requires_grad=False)
-        set_weight_attrs(offset_up, {"output_dim": 0})
+        set_weight_attrs(offset_x, {"output_dim": 0})
 
         layer.register_parameter("weight", weight)
         set_weight_attrs(weight, extra_weight_attrs)
         layer.register_parameter("deq_scale", deq_scale)
         set_weight_attrs(deq_scale, extra_weight_attrs)
         layer.register_parameter("scales_w", scales_w)
-        
         set_weight_attrs(scales_w, extra_weight_attrs)
+
         layer.register_parameter("scale_x", scale_x)
         set_weight_attrs(scale_x, extra_weight_attrs)
         layer.register_parameter("offset_x", offset_x)
