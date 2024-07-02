@@ -48,7 +48,7 @@ def get_args():
                         type=str, 
                         default="./origin_model/", 
                         help="origin .safetensors or .bin model weight dir")
-    parser.add_argument("--convert_model_dir", 
+    parser.add_argument("--converted_model_dir", 
                         type=str, 
                         default="./convert_model/", 
                         help="converted .safetensors or .bin model weight dir")
@@ -115,13 +115,13 @@ def convert(args):
         new_dict[key_name] = stat_dict[key_name]
 
 
-    save_model(new_dict, f"{args.convert_model_dir}")
-    copy_files_with_prefix(args.origin_model_dir, args.convert_model_dir, "tokenizer")
-    shutil.copy2(f"{args.origin_model_dir}/config.json", f"{args.convert_model_dir}/config.json")
-    shutil.copy2(f"{args.origin_model_dir}/quantize_config.json", f"{args.convert_model_dir}/quantize_config.json")
+    save_model(new_dict, f"{args.converted_model_dir}")
+    copy_files_with_prefix(args.origin_model_dir, args.converted_model_dir, "tokenizer")
+    shutil.copy2(f"{args.origin_model_dir}/config.json", f"{args.converted_model_dir}/config.json")
+    shutil.copy2(f"{args.origin_model_dir}/quantize_config.json", f"{args.converted_model_dir}/quantize_config.json")
 
 
-def __name__ == "__main__":
+if __name__ == "__main__":
     args = get_args()
     print(args)
 
