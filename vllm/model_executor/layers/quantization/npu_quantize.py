@@ -344,7 +344,7 @@ class RowParallelA8W8Linear(LinearBase):
             self.bias = Parameter(
                 torch.empty(self.output_size, dtype=self.bias_dtype), requires_grad=False)
             set_weight_attrs(self.bias, {
-                "output_dim": 0,
+                "input_dim": 0,
                 "weight_loader": self.weight_loader,
             })
         else:
