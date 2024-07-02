@@ -121,7 +121,6 @@ def _initialize_model(
         vision_language_config: Optional[VisionLanguageConfig]) -> nn.Module:
     """Initialize a model with the given configurations."""
     model_class = get_model_architecture(model_config)[0]
-    # quant_config = _get_quantization_config(model_config, load_config)
     quant_config = None
     if model_config.quantization is not None:
         quant_config = get_quant_config(model_config, load_config)
