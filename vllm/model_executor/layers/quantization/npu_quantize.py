@@ -22,26 +22,20 @@ class NpuA8W8GPTQConfig(QuantizationConfig):
 
     def __init__(
         self,
-        weight_bits: int,
-        group_size: int,
-        desc_act: bool,
+        weight_bits: int = 8,
     ) -> None:
         self.weight_bits = weight_bits
-        self.group_size = group_size
-        self.desc_act = desc_act
         if self.weight_bits not in [8]:
             raise ValueError(
-                "Currently, only 2/3/4/8-bit weight quantization is "
+                "Currently, only 8-bit weight quantization is "
                 f"supported for GPTQ, but got {self.weight_bits} bits.")
 
     def __repr__(self) -> str:
-        return (f"GPTQConfig(weight_bits={self.weight_bits}, "
-                f"group_size={self.group_size}, "
-                f"desc_act={self.desc_act})")
+        return (f"GPTQConfig(weight_bits={self.weight_bits}")
 
     @classmethod
     def get_name(cls) -> str:
-        return "gptq"
+        return "gptq_ascend"
 
     @classmethod
     def get_supported_act_dtypes(cls) -> List[torch.dtype]:
@@ -54,14 +48,12 @@ class NpuA8W8GPTQConfig(QuantizationConfig):
 
     @classmethod
     def get_config_filenames(cls) -> List[str]:
-        return ["quantize_config.json"]
+        return None
 
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> "GPTQConfig":
         weight_bits = cls.get_from_keys(config, ["bits"])
-        group_size = cls.get_from_keys(config, ["group_size"])
-        desc_act = cls.get_from_keys(config, ["desc_act"])
-        return cls(weight_bits, group_size, desc_act)
+        return cls(weight_bits)
 
     def get_quant_method(
             self, layer: torch.nn.Module) -> Optional["NpuA8W8GPTQLinearMethod"]:

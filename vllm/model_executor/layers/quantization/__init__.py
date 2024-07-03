@@ -20,7 +20,7 @@ QUANTIZATION_METHODS: Dict[str, Type[QuantizationConfig]] = {
     "squeezellm": SqueezeLLMConfig,
     "gptq_marlin": GPTQMarlinConfig,
     "marlin": MarlinConfig,
-    "ascendgptq": NpuA8W8GPTQConfig,
+    "gptq_ascend": NpuA8W8GPTQConfig,
 }
 
 
