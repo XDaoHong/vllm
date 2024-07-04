@@ -71,8 +71,8 @@ def convert(args):
         prefix = f"model.layers.{i}"
         m_names_list = ["self_attn", "mlp"]    # block names
         n_names_list = [["q_proj", "k_proj", "v_proj", "o_proj"],
-                        ["gate_proj", "up_proj", "down_proj"]]  # matmul names
-        k_split_names = ["o_proj", "down_proj"] # mm node will be splited at K dimension
+                        ["gate_proj", "up_proj", "down_proj"]]  # matmul node names
+        k_split_names = ["o_proj", "down_proj"] # this mm nodes will be splited at K dimension
         for i in range(len(m_names_list)):
             block_name = m_names_list[i]
             node_names = n_names_list[i]
@@ -118,7 +118,6 @@ def convert(args):
     save_model(new_dict, f"{args.converted_model_dir}")
     copy_files_with_prefix(args.origin_model_dir, args.converted_model_dir, "tokenizer")
     shutil.copy2(f"{args.origin_model_dir}/config.json", f"{args.converted_model_dir}/config.json")
-    shutil.copy2(f"{args.origin_model_dir}/quantize_config.json", f"{args.converted_model_dir}/quantize_config.json")
 
 
 if __name__ == "__main__":
