@@ -188,7 +188,6 @@ class ColumnParallelA8W8Linear(LinearBase):
 
         self.gather_output = gather_output
         self.bias_dtype = torch.float16
-        # print(f"column param dtype:{self.params_dtype}")
         if self.params_dtype == torch.int8:
             self.bias_dtype = torch.int32
 
@@ -196,7 +195,6 @@ class ColumnParallelA8W8Linear(LinearBase):
         tp_size = get_tensor_model_parallel_world_size()
         assert self.quant_method is not None
         self.output_size_per_partition = divide(self.output_size, tp_size)
-        # print(f"column output_size:{self.output_size} tp_size:{tp_size} ouput_per_partition:{self.output_size_per_partition}")
         self.output_partition_sizes = [self.output_size_per_partition]
         # If QKV or MergedColumn, use output size of each partition.
         if hasattr(self, "output_sizes"):
@@ -311,14 +309,12 @@ class RowParallelA8W8Linear(LinearBase):
         self.reduce_results = reduce_results
 
         self.bias_dtype = torch.float16
-        # print(f"row param dtype:{self.params_dtype}")
         if self.params_dtype == torch.int8:
             self.bias_dtype = torch.int32
 
         # Divide the weight matrix along the last dimension.
         self.tp_size = get_tensor_model_parallel_world_size()
         self.input_size_per_partition = divide(input_size, self.tp_size)
-        # print(f"row input_size:{input_size} tp_size:{self.tp_size} input_per_partition:{self.input_size_per_partition}")
         assert self.quant_method is not None
         self.quant_method.create_weights(
             layer=self,

@@ -67,8 +67,8 @@ def convert(args):
     for key in keys_out_layers_list:
         new_dict[key] = stat_dict[key]
 
-    for i in range(args.layer_nums):
-        prefix = f"model.layers.{i}"
+    for k in range(args.layer_nums):
+        prefix = f"model.layers.{k}"
         m_names_list = ["self_attn", "mlp"]    # block names
         n_names_list = [["q_proj", "k_proj", "v_proj", "o_proj"],
                         ["gate_proj", "up_proj", "down_proj"]]  # matmul node names
