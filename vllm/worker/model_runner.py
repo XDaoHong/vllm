@@ -546,11 +546,13 @@ class ModelRunner:
                 input_tokens.append([])
                 input_positions.append([])
                 slot_mapping.append([])
-                seq_lens.append(2)
                 block_tables.append([])
                 # lora_index_mapping.append(0)
                 slot_indices.append([_PAD_SLOT_ID, _PAD_SLOT_ID])
             # batch_size = graph_batch_size
+
+            for _ in range(max(ENV.decode_gear_list) - batch_size):
+                seq_lens.append(2)
 
             input_tokens = _with_pad(input_tokens, max_len=1, pad=0)
             input_positions = _with_pad(input_positions, max_len=1, pad=0)
